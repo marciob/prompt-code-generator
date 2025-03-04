@@ -1,6 +1,6 @@
 # Prompt Code Generator
 
-A powerful CLI tool that helps developers create context-rich prompts for AI assistants by selecting and organizing code files from your projects.
+A powerful CLI tool that helps developers create context-rich prompts for AI assistants by selecting and organizing code files from your projects in a prompt-friendly format.
 
 <p align="center">
   <img src="https://img.shields.io/badge/node-%3E%3D12.0.0-brightgreen" alt="Node.js Version">
