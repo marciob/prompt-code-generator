@@ -118,17 +118,17 @@ function listDirectory(rl, currentDir = "", page = 0) {
 function displayBrowseCommands() {
   console.log("\nCommands:");
   console.log("- Enter NUMBER to select/deselect a file (Example: 3)");
-  console.log("- Enter d NUMBER to navigate into a directory (Example: d 1)");
-  console.log("- Enter s NUMBER to select a whole directory (Example: s 2)");
+  console.log("- Enter dNUMBER to navigate into a directory (Example: d1)");
+  console.log("- Enter sNUMBER to select a whole directory (Example: s2)");
   console.log("- Enter NUMBER-NUMBER to select a range (Example: 1-5)");
   console.log(
-    "- Enter s NUMBER-NUMBER to select multiple directories (Example: s 1-3)"
+    "- Enter sNUMBER-NUMBER to select multiple directories (Example: s1-3)"
   );
   console.log(
-    "- Enter r NUMBER to exclude an item from selection (Example: r 4)"
+    "- Enter rNUMBER to exclude an item from selection (Example: r4)"
   );
   console.log(
-    "- Enter NUMBER-NUMBER r NUMBER to select a range with exclusions (Example: 1-5 r 3)"
+    "- Enter NUMBER-NUMBER rNUMBER to select a range with exclusions (Example: 1-5 r3)"
   );
   console.log("- Enter c to clear all selections");
   console.log("- Enter v to view current selections");
@@ -193,19 +193,27 @@ function handleNumberCommands(
   const numMatch = answer.match(/^(\d+)$/);
   // Directory navigation
   const dirMatch = answer.match(/^d\s*(\d+)$/);
+  const dirMatchNoSpace = answer.match(/^d(\d+)$/);
   // Single directory selection
   const selectDirMatch = answer.match(/^s\s*(\d+)$/);
+  const selectDirMatchNoSpace = answer.match(/^s(\d+)$/);
   // Range selection (e.g., 1-5)
   const rangeMatch = answer.match(/^(\d+)-(\d+)$/);
-  // Directory range selection (e.g., s 1-5)
+  // Directory range selection (e.g., s1-5)
   const selectDirRangeMatch = answer.match(/^s\s*(\d+)-(\d+)$/);
-  // Exclusion (e.g., r 3)
+  const selectDirRangeMatchNoSpace = answer.match(/^s(\d+)-(\d+)$/);
+  // Exclusion (e.g., r3)
   const excludeMatch = answer.match(/^r\s*(\d+)$/);
-  // Range with exclusion (e.g., 1-5 r 3)
+  const excludeMatchNoSpace = answer.match(/^r(\d+)$/);
+  // Range with exclusion (e.g., 1-5 r3)
   const rangeWithExcludeMatch = answer.match(/^(\d+)-(\d+)\s+r\s*(\d+)$/);
-  // Directory range with exclusion (e.g., s 1-5 r 3)
+  const rangeWithExcludeMatchNoSpace = answer.match(/^(\d+)-(\d+)\s*r(\d+)$/);
+  // Directory range with exclusion (e.g., s1-5 r3)
   const selectDirRangeWithExcludeMatch = answer.match(
     /^s\s*(\d+)-(\d+)\s+r\s*(\d+)$/
+  );
+  const selectDirRangeWithExcludeMatchNoSpace = answer.match(
+    /^s(\d+)-(\d+)\s*r(\d+)$/
   );
 
   if (numMatch) {
@@ -217,15 +225,17 @@ function handleNumberCommands(
       rl,
       resolve
     );
-  } else if (dirMatch) {
+  } else if (dirMatch || dirMatchNoSpace) {
+    const match = dirMatch || dirMatchNoSpace;
     handleDirectoryNavigation(
-      parseInt(dirMatch[1]) - 1,
+      parseInt(match[1]) - 1,
       currentPageEntries,
       resolve
     );
-  } else if (selectDirMatch) {
+  } else if (selectDirMatch || selectDirMatchNoSpace) {
+    const match = selectDirMatch || selectDirMatchNoSpace;
     handleDirectorySelection(
-      parseInt(selectDirMatch[1]) - 1,
+      parseInt(match[1]) - 1,
       currentPageEntries,
       currentDir,
       page,
@@ -244,10 +254,11 @@ function handleNumberCommands(
       resolve,
       false
     );
-  } else if (selectDirRangeMatch) {
+  } else if (selectDirRangeMatch || selectDirRangeMatchNoSpace) {
+    const match = selectDirRangeMatch || selectDirRangeMatchNoSpace;
     handleRangeSelection(
-      parseInt(selectDirRangeMatch[1]) - 1,
-      parseInt(selectDirRangeMatch[2]) - 1,
+      parseInt(match[1]) - 1,
+      parseInt(match[2]) - 1,
       null,
       currentPageEntries,
       currentDir,
@@ -256,20 +267,22 @@ function handleNumberCommands(
       resolve,
       true
     );
-  } else if (excludeMatch) {
+  } else if (excludeMatch || excludeMatchNoSpace) {
+    const match = excludeMatch || excludeMatchNoSpace;
     handleExclusion(
-      parseInt(excludeMatch[1]) - 1,
+      parseInt(match[1]) - 1,
       currentPageEntries,
       currentDir,
       page,
       rl,
       resolve
     );
-  } else if (rangeWithExcludeMatch) {
+  } else if (rangeWithExcludeMatch || rangeWithExcludeMatchNoSpace) {
+    const match = rangeWithExcludeMatch || rangeWithExcludeMatchNoSpace;
     handleRangeSelection(
-      parseInt(rangeWithExcludeMatch[1]) - 1,
-      parseInt(rangeWithExcludeMatch[2]) - 1,
-      parseInt(rangeWithExcludeMatch[3]) - 1,
+      parseInt(match[1]) - 1,
+      parseInt(match[2]) - 1,
+      parseInt(match[3]) - 1,
       currentPageEntries,
       currentDir,
       page,
@@ -277,11 +290,16 @@ function handleNumberCommands(
       resolve,
       false
     );
-  } else if (selectDirRangeWithExcludeMatch) {
+  } else if (
+    selectDirRangeWithExcludeMatch ||
+    selectDirRangeWithExcludeMatchNoSpace
+  ) {
+    const match =
+      selectDirRangeWithExcludeMatch || selectDirRangeWithExcludeMatchNoSpace;
     handleRangeSelection(
-      parseInt(selectDirRangeWithExcludeMatch[1]) - 1,
-      parseInt(selectDirRangeWithExcludeMatch[2]) - 1,
-      parseInt(selectDirRangeWithExcludeMatch[3]) - 1,
+      parseInt(match[1]) - 1,
+      parseInt(match[2]) - 1,
+      parseInt(match[3]) - 1,
       currentPageEntries,
       currentDir,
       page,
