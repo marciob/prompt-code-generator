@@ -1,0 +1,1269 @@
+Selected Files Output
+===================
+
+src/:
+
+----- app.controller.spec.ts -----
+import { Test, TestingModule } from '@nestjs/testing';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+
+describe('AppController', () => {
+  let appController: AppController;
+
+  beforeEach(async () => {
+    const app: TestingModule = await Test.createTestingModule({
+      controllers: [AppController],
+      providers: [AppService],
+    }).compile();
+
+    appController = app.get<AppController>(AppController);
+  });
+
+  describe('root', () => {
+    it('should return "Hello World!"', () => {
+      expect(appController.getHello()).toBe('Hello World!');
+    });
+  });
+});
+
+----- End of app.controller.spec.ts -----
+
+
+----- app.controller.ts -----
+import { Controller, Get } from '@nestjs/common';
+import { AppService } from './app.service';
+import { ConfigService as NestConfigService } from '@nestjs/config';
+
+@Controller()
+export class AppController {
+  constructor(
+    private readonly appService: AppService,
+    private readonly configService: NestConfigService,
+  ) {}
+
+  @Get()
+  getHello(): string {
+    return this.appService.getHello();
+  }
+
+  @Get('health')
+  getHealth() {
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      environment: this.configService.get<string>('NODE_ENV') || 'development',
+    };
+  }
+}
+
+----- End of app.controller.ts -----
+
+
+----- app.module.ts -----
+import { Module, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { ConfigModule } from './config';
+import { AiModule } from './controllers/ai/ai.module';
+import { TranscriptionModule } from './controllers/transcription/transcription.module';
+import { WebsocketsModule } from './websockets/websockets.module';
+import { FileValidationMiddleware } from './middleware/file-validation.middleware';
+
+@Module({
+  imports: [ConfigModule, AiModule, TranscriptionModule, WebsocketsModule],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Apply file validation middleware to transcription routes
+    consumer
+      .apply(FileValidationMiddleware)
+      .forRoutes({ path: 'api/transcribe', method: RequestMethod.POST });
+  }
+}
+
+----- End of app.module.ts -----
+
+
+----- app.service.ts -----
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class AppService {
+  getHello(): string {
+    return 'Welcome to the Vyvido AI Interview API. This API provides endpoints for transcribing audio and generating AI responses for interview scenarios.';
+  }
+}
+
+----- End of app.service.ts -----
+
+
+----- main.ts -----
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { ValidationPipe } from '@nestjs/common';
+import { ConfigService as NestConfigService } from '@nestjs/config';
+import * as dotenv from 'dotenv';
+import { NestExpressApplication } from '@nestjs/platform-express';
+
+// Load environment variables
+dotenv.config();
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const configService = app.get(NestConfigService);
+
+  // Configure global prefix
+  app.setGlobalPrefix('api');
+
+  // Configure CORS
+  app.enableCors({
+    origin: configService.get<string>('CORS_ORIGIN') || '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
+
+  // Configure global validation pipe
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
+
+  // Start server
+  const port = configService.get<number>('PORT') || 3001;
+  await app.listen(port);
+  console.log(`Server running on http://localhost:${port}`);
+  console.log(`Health check available at http://localhost:${port}/api/health`);
+}
+bootstrap();
+
+----- End of main.ts -----
+
+src/config/:
+
+----- config.module.ts -----
+import { Module } from '@nestjs/common';
+import { ConfigModule as NestConfigModule } from '@nestjs/config';
+import { join } from 'path';
+import { ConfigService } from './config.service';
+
+@Module({
+  imports: [
+    NestConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: join(process.cwd(), '.env'),
+    }),
+  ],
+  providers: [ConfigService],
+  exports: [ConfigService],
+})
+export class ConfigModule {}
+
+----- End of config.module.ts -----
+
+
+----- config.service.ts -----
+import { Injectable } from '@nestjs/common';
+import { ConfigService as NestConfigService } from '@nestjs/config';
+
+@Injectable()
+export class ConfigService {
+  constructor(private configService: NestConfigService) {}
+
+  get serverConfig() {
+    return {
+      port: parseInt(this.configService.get<string>('PORT', '3001'), 10),
+      env: this.configService.get<string>('NODE_ENV', 'development'),
+      cors: {
+        origin: this.configService.get<string>('CORS_ORIGIN', '*'),
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+      },
+    };
+  }
+
+  get assemblyAIConfig() {
+    return {
+      apiKey: this.configService.get<string>('ASSEMBLYAI_API_KEY'),
+      defaultLanguage: this.configService.get<string>('DEFAULT_LANGUAGE', 'pt'),
+    };
+  }
+
+  get openAIConfig() {
+    return {
+      apiKey: this.configService.get<string>('OPENAI_API_KEY'),
+      model: this.configService.get<string>(
+        'OPENAI_MODEL',
+        'gpt-4o-mini-2024-07-18',
+      ),
+      temperature: parseFloat(
+        this.configService.get<string>('OPENAI_TEMPERATURE', '0.7'),
+      ),
+      maxTokens: parseInt(
+        this.configService.get<string>('OPENAI_MAX_TOKENS', '1000'),
+        10,
+      ),
+    };
+  }
+
+  get uploadConfig() {
+    return {
+      maxFileSize: 10 * 1024 * 1024, // 10MB
+      allowedMimeTypes: [
+        'audio/wav',
+        'audio/mpeg',
+        'audio/mp3',
+        'audio/mp4',
+        'audio/ogg',
+        'audio/webm',
+        'audio/x-m4a',
+      ],
+    };
+  }
+
+  get loggingConfig() {
+    return {
+      level: this.configService.get<string>('LOG_LEVEL', 'info'),
+    };
+  }
+}
+
+----- End of config.service.ts -----
+
+
+----- index.ts -----
+export * from './config.module';
+export * from './config.service';
+
+----- End of index.ts -----
+
+src/controllers/ai/:
+
+----- ai.controller.ts -----
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Param,
+  HttpStatus,
+  HttpCode,
+} from '@nestjs/common';
+import { AiService } from './ai.service';
+import { BadRequestError } from '../../utils/errors';
+
+// DTOs
+class GenerateResponseDto {
+  text!: string;
+  conversationId?: string;
+  role?: string;
+  language?: string;
+}
+
+@Controller('ai')
+export class AiController {
+  constructor(private readonly aiService: AiService) {}
+
+  /**
+   * HTTP endpoint for generating AI responses
+   */
+  @Post('generate')
+  @HttpCode(HttpStatus.OK)
+  async generateResponse(@Body() generateResponseDto: GenerateResponseDto) {
+    const { text, conversationId, role, language } = generateResponseDto;
+
+    // Validate required fields
+    if (!text) {
+      throw new BadRequestError('Text is required');
+    }
+
+    // Process with AI
+    const result = await this.aiService.processTranscription(text, {
+      conversationId,
+      role,
+      language,
+    });
+
+    // Return response
+    return result;
+  }
+
+  /**
+   * HTTP endpoint for retrieving conversation history
+   */
+  @Get('conversation/:conversationId')
+  async getConversationHistory(
+    @Param('conversationId') conversationId: string,
+  ) {
+    // Validate conversation ID
+    if (!conversationId) {
+      throw new BadRequestError('Conversation ID is required');
+    }
+
+    // Get conversation from cache
+    const conversation = this.aiService.getConversationHistory(conversationId);
+    if (!conversation) {
+      throw new BadRequestError(`Conversation ${conversationId} not found`);
+    }
+
+    // Return conversation history
+    return {
+      conversationId,
+      messages: conversation.messages,
+      role: conversation.role,
+      language: conversation.language,
+      lastUpdated: conversation.lastUpdated,
+    };
+  }
+}
+
+----- End of ai.controller.ts -----
+
+
+----- ai.module.ts -----
+import { Module } from '@nestjs/common';
+import { AiController } from './ai.controller';
+import { AiService } from './ai.service';
+import { ConfigModule } from '../../config';
+
+@Module({
+  imports: [ConfigModule],
+  controllers: [AiController],
+  providers: [AiService],
+  exports: [AiService],
+})
+export class AiModule {}
+
+----- End of ai.module.ts -----
+
+
+----- ai.service.ts -----
+import { Injectable } from '@nestjs/common';
+import { OpenAI } from 'openai';
+import { ConfigService } from '../../config/config.service';
+import * as interviewPrompts from '../../prompts/interview';
+import { InternalServerError } from '../../utils/errors';
+
+// Define types for conversation history
+export interface Message {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface Conversation {
+  messages: Message[];
+  role: string;
+  language: string;
+  lastUpdated: Date;
+}
+
+export interface ProcessOptions {
+  conversationId?: string | null;
+  role?: string;
+  language?: string;
+}
+
+export interface ProcessResponse {
+  response: string;
+  conversationId: string;
+  messages: Message[];
+}
+
+@Injectable()
+export class AiService {
+  private openai: OpenAI;
+  // Store conversation history (use database in production)
+  private conversationCache = new Map<string, Conversation>();
+
+  constructor(private configService: ConfigService) {
+    this.openai = new OpenAI({
+      apiKey: this.configService.openAIConfig.apiKey,
+    });
+  }
+
+  /**
+   * Core business logic for OpenAI processing. Used both directly by other controllers
+   * and through the HTTP endpoint. Handles the actual AI interaction.
+   *
+   * @param transcription - Text to be processed by AI
+   * @param options - Processing options
+   * @returns AI response with conversation context
+   */
+  async processTranscription(
+    transcription: string,
+    options: ProcessOptions = {},
+  ): Promise<ProcessResponse> {
+    const {
+      conversationId = null,
+      role = 'Software Engineer',
+      language = 'Portuguese',
+    } = options;
+
+    // Generate a new conversation ID if not provided
+    const currentConversationId = conversationId || Date.now().toString();
+
+    // Get or initialize conversation history
+    let conversation = this.conversationCache.get(currentConversationId);
+    if (!conversation) {
+      // Initialize new conversation with system prompt
+      conversation = {
+        messages: [
+          {
+            role: 'system',
+            content: interviewPrompts.getSystemPrompt(role, language),
+          },
+        ],
+        role,
+        language,
+        lastUpdated: new Date(),
+      };
+      this.conversationCache.set(currentConversationId, conversation);
+    }
+
+    // Add user message to conversation
+    conversation.messages.push({
+      role: 'user',
+      content: transcription,
+    });
+
+    try {
+      // Call OpenAI API
+      const completion = await this.openai.chat.completions.create({
+        model: this.configService.openAIConfig.model,
+        messages: conversation.messages,
+        temperature: this.configService.openAIConfig.temperature,
+        max_tokens: this.configService.openAIConfig.maxTokens,
+      });
+
+      // Extract response
+      const responseMessage = completion.choices[0].message;
+
+      // Add assistant response to conversation history
+      conversation.messages.push({
+        role: 'assistant',
+        content: responseMessage.content || '',
+      });
+
+      // Update conversation timestamp
+      conversation.lastUpdated = new Date();
+
+      // Return response with conversation context
+      return {
+        response: responseMessage.content || '',
+        conversationId: currentConversationId,
+        messages: conversation.messages,
+      };
+    } catch (error: any) {
+      console.error('OpenAI API Error:', error);
+      throw new InternalServerError(
+        'Failed to process with AI',
+        error.message || error,
+      );
+    }
+  }
+
+  /**
+   * Get conversation history
+   * @param conversationId - The ID of the conversation to retrieve
+   * @returns The conversation history
+   */
+  getConversationHistory(conversationId: string): Conversation | null {
+    return this.conversationCache.get(conversationId) || null;
+  }
+}
+
+----- End of ai.service.ts -----
+
+src/controllers/transcription/:
+
+----- transcription.controller.ts -----
+import {
+  Controller,
+  Post,
+  Get,
+  Param,
+  Req,
+  Res,
+  HttpStatus,
+  UseInterceptors,
+  UploadedFile,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Request, Response } from 'express';
+import { TranscriptionService } from './transcription.service';
+import { BadRequestError } from '../../utils/errors';
+
+@Controller('transcribe')
+export class TranscriptionController {
+  constructor(private readonly transcriptionService: TranscriptionService) {}
+
+  /**
+   * POST endpoint for transcribing audio
+   */
+  @Post()
+  @UseInterceptors(FileInterceptor('audio'))
+  async transcribeAudio(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const startTime = performance.now();
+    const requestStartTime = new Date().toISOString();
+    console.log(`[API Performance] Request started at ${requestStartTime}`);
+
+    try {
+      // Check if audio file exists in request
+      if (!file) {
+        throw new BadRequestError('No audio file provided');
+      }
+
+      // Extract query parameters
+      const processWithAI = req.body.processWithAI === 'true';
+      const conversationId = req.body.conversationId || null;
+      const role = req.body.role || 'Software Engineer';
+      const language = req.body.language || undefined;
+
+      console.log(
+        `[Transcription] Processing audio file: ${file.originalname}`,
+      );
+      console.log(`[Transcription] File size: ${file.size} bytes`);
+      console.log(`[Transcription] Process with AI: ${processWithAI}`);
+      console.log(`[Transcription] Language: ${language}`);
+
+      // Create a buffer from the file
+      const audioBuffer = file.buffer;
+
+      // Process transcription
+      const result = await this.transcriptionService.transcribeAudio(
+        audioBuffer,
+        {
+          processWithAI,
+          conversationId,
+          role,
+          language,
+        },
+      );
+
+      // Calculate and log performance metrics
+      const endTime = performance.now();
+      const duration = endTime - startTime;
+      console.log(
+        `[API Performance] Request completed in ${duration.toFixed(2)}ms`,
+      );
+
+      // Return response
+      return res.status(HttpStatus.OK).json(result);
+    } catch (error: any) {
+      console.error(`[Transcription] Error:`, error);
+      return res.status(error.status || HttpStatus.INTERNAL_SERVER_ERROR).json({
+        error: {
+          message: error.message || 'Internal Server Error',
+          status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+          ...(error.details && { details: error.details }),
+        },
+      });
+    }
+  }
+
+  /**
+   * GET endpoint for checking transcription status
+   */
+  @Get(':transcriptionId')
+  async getTranscriptionStatus(
+    @Param('transcriptionId') transcriptionId: string,
+  ) {
+    // Check if transcription ID is provided
+    if (!transcriptionId) {
+      throw new BadRequestError('Transcription ID is required');
+    }
+
+    // Get transcription status
+    const result =
+      await this.transcriptionService.getTranscriptionStatus(transcriptionId);
+
+    // Return response
+    return result;
+  }
+}
+
+----- End of transcription.controller.ts -----
+
+
+----- transcription.module.ts -----
+import { Module } from '@nestjs/common';
+import { TranscriptionController } from './transcription.controller';
+import { TranscriptionService } from './transcription.service';
+import { ConfigModule } from '../../config';
+import { AiModule } from '../ai/ai.module';
+
+@Module({
+  imports: [ConfigModule, AiModule],
+  controllers: [TranscriptionController],
+  providers: [TranscriptionService],
+  exports: [TranscriptionService],
+})
+export class TranscriptionModule {}
+
+----- End of transcription.module.ts -----
+
+
+----- transcription.service.ts -----
+import { Injectable } from '@nestjs/common';
+import { AssemblyAI } from 'assemblyai';
+import { ConfigService } from '../../config/config.service';
+import { InternalServerError, BadRequestError } from '../../utils/errors';
+import { AiService } from '../ai/ai.service';
+
+// Define types for transcription results
+export interface TranscriptionResult {
+  id: string;
+  text: string;
+  status: string;
+  error?: string;
+  language?: string;
+  audio_duration?: number;
+  created_at?: string;
+  completed_at?: string;
+  aiProcessed?: boolean;
+  aiResponse?: any;
+}
+
+@Injectable()
+export class TranscriptionService {
+  private client: AssemblyAI;
+  // In-memory cache for transcription results (in a production environment, use Redis or a database)
+  private transcriptionCache = new Map<string, TranscriptionResult>();
+
+  constructor(
+    private configService: ConfigService,
+    private aiService: AiService,
+  ) {
+    this.client = new AssemblyAI({
+      apiKey: this.configService.assemblyAIConfig.apiKey || '',
+    });
+  }
+
+  /**
+   * Transcribe audio buffer using AssemblyAI
+   * @param audioBuffer - The audio buffer to transcribe
+   * @param options - Additional options for transcription
+   * @returns The transcription result
+   */
+  async transcribeAudio(
+    audioBuffer: Buffer,
+    options: {
+      processWithAI?: boolean;
+      conversationId?: string | null;
+      role?: string;
+      language?: string;
+    } = {},
+  ): Promise<TranscriptionResult> {
+    const {
+      processWithAI = false,
+      conversationId = null,
+      role = 'Software Engineer',
+      language = this.configService.assemblyAIConfig.defaultLanguage,
+    } = options;
+
+    try {
+      // Submit transcription request to AssemblyAI
+      const transcript = await this.client.transcripts.transcribe({
+        audio: audioBuffer,
+        language_code: language,
+      });
+
+      if (!transcript || !transcript.id) {
+        throw new InternalServerError('Failed to submit transcription request');
+      }
+
+      // Store result in cache
+      const result: TranscriptionResult = {
+        id: transcript.id,
+        text: transcript.text || '',
+        status: transcript.status,
+        language: language,
+        audio_duration: transcript.audio_duration || undefined,
+        created_at: (transcript as any).created_at,
+        completed_at: (transcript as any).completed_at,
+        aiProcessed: false,
+      };
+
+      this.transcriptionCache.set(transcript.id, result);
+
+      // Process with AI if requested
+      if (processWithAI && transcript.text) {
+        try {
+          console.log(`[AI Processing] Processing transcription with AI`);
+          const aiResponse = await this.aiService.processTranscription(
+            transcript.text,
+            {
+              conversationId,
+              role,
+              language,
+            },
+          );
+
+          // Update cache with AI response
+          result.aiProcessed = true;
+          result.aiResponse = aiResponse;
+          this.transcriptionCache.set(transcript.id, result);
+
+          console.log(`[AI Processing] AI processing completed`);
+        } catch (aiError: any) {
+          console.error(`[AI Processing] Error processing with AI:`, aiError);
+          // Continue with transcription result even if AI processing fails
+          result.aiProcessed = false;
+          result.aiResponse = {
+            error: aiError.message || 'AI processing failed',
+          };
+        }
+      }
+
+      return result;
+    } catch (error: any) {
+      console.error(`[Transcription] Error:`, error);
+      throw new InternalServerError(
+        'Failed to transcribe audio',
+        error.message || error,
+      );
+    }
+  }
+
+  /**
+   * Get transcription status
+   * @param transcriptionId - The ID of the transcription to retrieve
+   * @returns The transcription result
+   */
+  async getTranscriptionStatus(
+    transcriptionId: string,
+  ): Promise<TranscriptionResult> {
+    // Check if transcription exists in cache
+    const cachedResult = this.transcriptionCache.get(transcriptionId);
+    if (cachedResult) {
+      return cachedResult;
+    }
+
+    // If not in cache, check with AssemblyAI
+    try {
+      const transcript = await this.client.transcripts.get(transcriptionId);
+
+      if (!transcript) {
+        throw new BadRequestError(`Transcription ${transcriptionId} not found`);
+      }
+
+      // Create result object
+      const result: TranscriptionResult = {
+        id: transcript.id,
+        text: transcript.text || '',
+        status: transcript.status,
+        language: transcript.language_code,
+        audio_duration: transcript.audio_duration || undefined,
+        created_at: (transcript as any).created_at,
+        completed_at: (transcript as any).completed_at,
+        aiProcessed: false,
+      };
+
+      // Store in cache
+      this.transcriptionCache.set(transcriptionId, result);
+
+      return result;
+    } catch (apiError: any) {
+      // Handle AssemblyAI API errors
+      if (apiError.status === 404) {
+        throw new BadRequestError(`Transcription ${transcriptionId} not found`);
+      }
+      throw new InternalServerError(
+        'Failed to retrieve transcription status',
+        apiError.message || apiError,
+      );
+    }
+  }
+}
+
+----- End of transcription.service.ts -----
+
+src/middleware/:
+
+----- file-validation.middleware.ts -----
+import { Injectable, NestMiddleware } from '@nestjs/common';
+import { Request, Response, NextFunction } from 'express';
+import * as multer from 'multer';
+import { ConfigService } from '../config/config.service';
+import { BadRequestError } from '../utils/errors';
+
+@Injectable()
+export class FileValidationMiddleware implements NestMiddleware {
+  private upload: multer.Multer;
+
+  constructor(private configService: ConfigService) {
+    // Configure multer for memory storage
+    const storage = multer.memoryStorage();
+
+    // File filter function to validate file types
+    const fileFilter = (
+      req: Request,
+      file: Express.Multer.File,
+      cb: multer.FileFilterCallback,
+    ): void => {
+      // Check if the file type is allowed
+      if (
+        this.configService.uploadConfig.allowedMimeTypes.includes(file.mimetype)
+      ) {
+        cb(null, true);
+      } else {
+        cb(
+          new BadRequestError(
+            `Unsupported file type: ${file.mimetype}. Supported types: ${this.configService.uploadConfig.allowedMimeTypes.join(', ')}`,
+          ),
+        );
+      }
+    };
+
+    // Configure multer with storage, limits, and file filter
+    this.upload = multer({
+      storage,
+      limits: {
+        fileSize: this.configService.uploadConfig.maxFileSize, // Default: 10MB
+      },
+      fileFilter,
+    });
+  }
+
+  use(req: Request, res: Response, next: NextFunction) {
+    // Use multer to process the file
+    this.upload.single('audio')(req, res, (err: any) => {
+      if (err instanceof multer.MulterError) {
+        // A Multer error occurred when uploading
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return next(
+            new BadRequestError(
+              `File too large. Maximum size allowed is ${
+                this.configService.uploadConfig.maxFileSize / (1024 * 1024)
+              }MB`,
+            ),
+          );
+        }
+        return next(new BadRequestError(err.message));
+      } else if (err) {
+        // An unknown error occurred
+        return next(err);
+      }
+
+      // No error occurred, continue
+      next();
+    });
+  }
+}
+
+----- End of file-validation.middleware.ts -----
+
+src/prompts/:
+
+----- interview.ts -----
+/**
+ * Interview prompt templates for OpenAI
+ */
+
+interface SystemPromptOptions {
+  role?: string;
+  language?: string;
+}
+
+interface UserPromptContext {
+  conversationHistory?: any[];
+}
+
+/**
+ * Generate a system prompt for the interview assistant
+ * @param role - The role being interviewed for
+ * @param language - The language to respond in
+ * @returns The system prompt
+ */
+export const getSystemPrompt = (
+  role: string = 'Desenvolvedor de Software',
+  language: string = 'Português',
+): string => {
+  return `Você é um assistente de entrevista de IA para uma vaga de ${role}. 
+Sua tarefa é conduzir uma entrevista profissional, fazendo perguntas relevantes e fornecendo feedback construtivo.
+Responda em ${language} a menos que o candidato fale em outro idioma.
+Seja conciso, profissional e prestativo.
+Forneça feedback construtivo quando apropriado.
+Faça perguntas de acompanhamento que sejam relevantes para as respostas anteriores do candidato.
+Concentre-se em avaliar tanto habilidades técnicas quanto habilidades interpessoais.`;
+};
+
+/**
+ * Generate a user prompt based on the transcription
+ * @param transcription - The transcribed text from the candidate
+ * @param context - Additional context about the conversation
+ * @returns The user prompt
+ */
+export const generateUserPrompt = (
+  transcription: string,
+  context: UserPromptContext = {},
+): string => {
+  const { conversationHistory = [] } = context;
+
+  // If there's conversation history, include it for context
+  if (conversationHistory.length > 0) {
+    return `Conversa anterior: ${JSON.stringify(conversationHistory)}
+    
+Última resposta do candidato: ${transcription}
+
+Com base nesta resposta e no histórico da conversa, continue a entrevista com uma pergunta de acompanhamento apropriada ou feedback.`;
+  }
+
+  // For the first interaction
+  return `Resposta do candidato: ${transcription}
+
+Com base nesta resposta, continue a entrevista com uma pergunta de acompanhamento apropriada ou feedback.`;
+};
+
+----- End of interview.ts -----
+
+src/utils/:
+
+----- errors.ts -----
+import { HttpException, HttpStatus } from '@nestjs/common';
+
+/**
+ * Custom error class for API errors
+ */
+export class ApiError extends HttpException {
+  constructor(
+    message: string,
+    status: HttpStatus = HttpStatus.INTERNAL_SERVER_ERROR,
+    details: any = null,
+  ) {
+    super(
+      {
+        message,
+        status,
+        details,
+      },
+      status,
+    );
+  }
+}
+
+/**
+ * Bad request error (400)
+ */
+export class BadRequestError extends ApiError {
+  constructor(message: string = 'Bad Request', details: any = null) {
+    super(message, HttpStatus.BAD_REQUEST, details);
+  }
+}
+
+/**
+ * Not found error (404)
+ */
+export class NotFoundError extends ApiError {
+  constructor(message: string = 'Resource Not Found', details: any = null) {
+    super(message, HttpStatus.NOT_FOUND, details);
+  }
+}
+
+/**
+ * Internal server error (500)
+ */
+export class InternalServerError extends ApiError {
+  constructor(message: string = 'Internal Server Error', details: any = null) {
+    super(message, HttpStatus.INTERNAL_SERVER_ERROR, details);
+  }
+}
+
+/**
+ * Service unavailable error (503)
+ */
+export class ServiceUnavailableError extends ApiError {
+  constructor(message: string = 'Service Unavailable', details: any = null) {
+    super(message, HttpStatus.SERVICE_UNAVAILABLE, details);
+  }
+}
+
+----- End of errors.ts -----
+
+src/websockets/:
+
+----- interview.gateway.ts -----
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  SubscribeMessage,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  OnGatewayInit,
+  MessageBody,
+  ConnectedSocket,
+} from '@nestjs/websockets';
+import { Server, Socket } from 'socket.io';
+import { Logger } from '@nestjs/common';
+import { AiService } from '../controllers/ai/ai.service';
+import { TranscriptionService } from '../controllers/transcription/transcription.service';
+import { ConfigService } from '../config/config.service';
+
+interface InterviewSession {
+  id: string;
+  role: string;
+  language: string;
+  conversationId: string | null;
+  createdAt: Date;
+  lastActivity: Date;
+}
+
+@WebSocketGateway({
+  cors: {
+    origin: '*', // In production, restrict this to your frontend domain
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  namespace: 'interview',
+})
+export class InterviewGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
+  @WebSocketServer() server: Server;
+  private logger = new Logger('InterviewGateway');
+  private sessions = new Map<string, InterviewSession>();
+
+  constructor(
+    private aiService: AiService,
+    private transcriptionService: TranscriptionService,
+    private configService: ConfigService,
+  ) {}
+
+  afterInit(server: Server) {
+    this.logger.log('Interview WebSocket Gateway initialized');
+  }
+
+  handleConnection(client: Socket) {
+    this.logger.log(`Client connected: ${client.id}`);
+
+    // Create a new session for this client
+    const session: InterviewSession = {
+      id: client.id,
+      role: 'Software Engineer',
+      language: this.configService.assemblyAIConfig.defaultLanguage,
+      conversationId: null,
+      createdAt: new Date(),
+      lastActivity: new Date(),
+    };
+
+    this.sessions.set(client.id, session);
+
+    // Send welcome message
+    client.emit('connection_established', {
+      message: 'Connected to interview server',
+      sessionId: client.id,
+    });
+  }
+
+  handleDisconnect(client: Socket) {
+    this.logger.log(`Client disconnected: ${client.id}`);
+    // Clean up session
+    this.sessions.delete(client.id);
+  }
+
+  @SubscribeMessage('start_interview')
+  handleStartInterview(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { role?: string; language?: string },
+  ) {
+    const session = this.sessions.get(client.id);
+    if (!session) {
+      client.emit('error', { message: 'Session not found' });
+      return;
+    }
+
+    // Update session with role and language if provided
+    if (data.role) session.role = data.role;
+    if (data.language) session.language = data.language;
+    session.lastActivity = new Date();
+
+    this.logger.log(
+      `Starting interview for client ${client.id} - Role: ${session.role}, Language: ${session.language}`,
+    );
+
+    // Send confirmation
+    client.emit('interview_started', {
+      sessionId: client.id,
+      role: session.role,
+      language: session.language,
+      message: `Interview for ${session.role} position started in ${session.language}`,
+    });
+  }
+
+  @SubscribeMessage('process_audio')
+  async handleProcessAudio(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { audio: Buffer; processWithAI?: boolean },
+  ) {
+    const session = this.sessions.get(client.id);
+    if (!session) {
+      client.emit('error', { message: 'Session not found' });
+      return;
+    }
+
+    try {
+      // Update last activity
+      session.lastActivity = new Date();
+
+      // Process with transcription service
+      const processWithAI = data.processWithAI !== false; // Default to true
+
+      // Emit processing status
+      client.emit('processing', { status: 'Transcribing audio...' });
+
+      const result = await this.transcriptionService.transcribeAudio(
+        data.audio,
+        {
+          processWithAI,
+          conversationId: session.conversationId,
+          role: session.role,
+          language: session.language,
+        },
+      );
+
+      // Update conversation ID if this is the first interaction
+      if (processWithAI && result.aiProcessed && result.aiResponse) {
+        session.conversationId = result.aiResponse.conversationId;
+      }
+
+      // Send result back to client
+      client.emit('transcription_complete', result);
+    } catch (error) {
+      this.logger.error(
+        `Error processing audio: ${error.message}`,
+        error.stack,
+      );
+      client.emit('error', {
+        message: 'Failed to process audio',
+        details: error.message,
+      });
+    }
+  }
+
+  @SubscribeMessage('send_message')
+  async handleSendMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { text: string },
+  ) {
+    const session = this.sessions.get(client.id);
+    if (!session) {
+      client.emit('error', { message: 'Session not found' });
+      return;
+    }
+
+    try {
+      // Update last activity
+      session.lastActivity = new Date();
+
+      // Process with AI service
+      client.emit('processing', { status: 'Processing message...' });
+
+      const result = await this.aiService.processTranscription(data.text, {
+        conversationId: session.conversationId,
+        role: session.role,
+        language: session.language,
+      });
+
+      // Update conversation ID if this is the first interaction
+      if (!session.conversationId) {
+        session.conversationId = result.conversationId;
+      }
+
+      // Send result back to client
+      client.emit('message_response', result);
+    } catch (error) {
+      this.logger.error(
+        `Error processing message: ${error.message}`,
+        error.stack,
+      );
+      client.emit('error', {
+        message: 'Failed to process message',
+        details: error.message,
+      });
+    }
+  }
+
+  @SubscribeMessage('get_conversation')
+  async handleGetConversation(@ConnectedSocket() client: Socket) {
+    const session = this.sessions.get(client.id);
+    if (!session) {
+      client.emit('error', { message: 'Session not found' });
+      return;
+    }
+
+    // If no conversation ID, return empty conversation
+    if (!session.conversationId) {
+      client.emit('conversation', {
+        messages: [],
+        role: session.role,
+        language: session.language,
+      });
+      return;
+    }
+
+    try {
+      // Get conversation from AI service
+      const conversation = this.aiService.getConversationHistory(
+        session.conversationId,
+      );
+
+      if (!conversation) {
+        client.emit('conversation', {
+          messages: [],
+          role: session.role,
+          language: session.language,
+        });
+        return;
+      }
+
+      // Send conversation back to client
+      client.emit('conversation', {
+        conversationId: session.conversationId,
+        messages: conversation.messages,
+        role: conversation.role,
+        language: conversation.language,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error getting conversation: ${error.message}`,
+        error.stack,
+      );
+      client.emit('error', {
+        message: 'Failed to get conversation',
+        details: error.message,
+      });
+    }
+  }
+}
+
+----- End of interview.gateway.ts -----
+
+
+----- websockets.module.ts -----
+import { Module } from '@nestjs/common';
+import { InterviewGateway } from './interview.gateway';
+import { AiModule } from '../controllers/ai/ai.module';
+import { TranscriptionModule } from '../controllers/transcription/transcription.module';
+import { ConfigModule } from '../config';
+
+@Module({
+  imports: [ConfigModule, AiModule, TranscriptionModule],
+  providers: [InterviewGateway],
+  exports: [InterviewGateway],
+})
+export class WebsocketsModule {}
+
+----- End of websockets.module.ts -----
+
+
+---------------------------------------------
+Total: 19 file(s) printed

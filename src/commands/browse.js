@@ -438,36 +438,61 @@ function printSelectedFiles(rl, callback) {
   const selectedPaths = appState.getSelectedPaths();
   if (selectedPaths.length === 0) {
     console.log("No items selected to print");
-  } else {
-    const grouped = {};
-    selectedPaths.forEach((filePath) => {
-      const dir = path.dirname(filePath);
-      if (!grouped[dir]) grouped[dir] = [];
-      grouped[dir].push(path.basename(filePath));
-    });
-
-    Object.keys(grouped)
-      .sort()
-      .forEach((dir) => {
-        console.log(`${dir === "." ? "Root" : dir}/:`);
-        grouped[dir].sort().forEach((file) => {
-          try {
-            const fullPath = path.join(appState.rootPath, dir, file);
-            const content = fs.readFileSync(fullPath, "utf8");
-            console.log(`\n----- ${file} -----`);
-            console.log(content);
-            console.log(`\n----- End of ${file} -----\n`);
-          } catch (error) {
-            console.log(`  Error reading ${file}: ${error.message}`);
-          }
-        });
-      });
+    rl.question("Press Enter to continue...", callback);
+    return;
   }
+
+  let output = "";
+  output += "Selected Files Output\n";
+  output += "===================\n\n";
+
+  const grouped = {};
+  selectedPaths.forEach((filePath) => {
+    const dir = path.dirname(filePath);
+    if (!grouped[dir]) grouped[dir] = [];
+    grouped[dir].push(path.basename(filePath));
+  });
+
+  Object.keys(grouped)
+    .sort()
+    .forEach((dir) => {
+      const dirHeader = `${dir === "." ? "Root" : dir}/:\n`;
+      console.log(dirHeader);
+      output += dirHeader;
+
+      grouped[dir].sort().forEach((file) => {
+        try {
+          const fullPath = path.join(appState.rootPath, dir, file);
+          const content = fs.readFileSync(fullPath, "utf8");
+          const fileContent = `\n----- ${file} -----\n${content}\n----- End of ${file} -----\n\n`;
+          console.log(fileContent);
+          output += fileContent;
+        } catch (error) {
+          const errorMsg = `  Error reading ${file}: ${error.message}\n`;
+          console.log(errorMsg);
+          output += errorMsg;
+        }
+      });
+    });
 
   console.log("---------------------------------------------");
   console.log(`Total: ${selectedPaths.length} file(s) printed`);
+  output += "\n---------------------------------------------\n";
+  output += `Total: ${selectedPaths.length} file(s) printed\n`;
 
-  rl.question("Press Enter to continue...", callback);
+  rl.question("Do you want to save the output to a file? (y/n): ", (answer) => {
+    if (answer.toLowerCase() === "y") {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const outputFileName = `printed_files_${timestamp}.txt`;
+      try {
+        fs.writeFileSync(outputFileName, output);
+        console.log(`\nOutput saved to: ${outputFileName}`);
+      } catch (error) {
+        console.error(`Error saving file: ${error.message}`);
+      }
+    }
+    rl.question("\nPress Enter to continue...", callback);
+  });
 }
 
 // Function to handle range selection with optional exclusion
